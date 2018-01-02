@@ -34,8 +34,6 @@ class linecube:
         # Read in the file and set defaults.
         self.path = path
         self.cube = imagecube(path)
-        self.data = self.cube.data * self.cube.Tb
-        self.data = np.where(np.isfinite(self.data), self.data, 0.0)
         self.inc = inc
         self.dist = max(dist, 1.0)
 
@@ -55,18 +53,20 @@ class linecube:
             self.cube.downsample_cube(downsample, center=True)
 
         # Use the noise to clip low signal pixels.
+        self.data = self.cube.data
         if rms is not None:
             self.rms = rms
         else:
             self.rms = self.estimate_rms(kwargs.get('linefreechans', 5))
-        self.nsigma = nsigma
-        self.clip = self.nsigma * self.rms
+        self.clip = nsigma * self.rms
         self.data = np.where(abs(self.data) >= self.clip, self.data, 0.0)
         return
 
     def estimate_rms(self, N=5):
-        """Estimate the noise from the end nchans channels."""
-        return np.nanstd([self.cube.data[:N], self.cube.data[-N:]])
+        """Estimate the noise from centre of the end N channels."""
+        dx = int(self.cube.nxpix / 4)
+        return np.nanstd([self.data[:N, dx:-dx, dx:-dx],
+                          self.data[-N:, dx:-dx, dx:-dx]])
 
     def emission_surface(self, **kwargs):
         """
@@ -74,14 +74,14 @@ class linecube:
         surface. This is a wrapper of the `find_surface` and `bin_surface`
         functions. See those for a better understanding of the kwargs.
         """
-        coords = self.find_surface(kwargs.pop('x0', 0.0),
-                                   kwargs.pop('y0', 0.0),
-                                   kwargs.pop('mpd', 0.0),
-                                   kwargs.pop('mph', 0.0),
-                                   kwargs.pop('inc', None))
+        coords = self.find_surface(x0=kwargs.pop('x0', 0.0),
+                                   y0=kwargs.pop('y0', 0.0),
+                                   mpd=kwargs.pop('mpd', 0.0),
+                                   mph=kwargs.pop('mph', 0.0),
+                                   inc=kwargs.pop('inc', None))
         return self.bin_surface(coords, **kwargs)
 
-    def bin_surface(self, coords, rmin=None, rmax=None, nbins=20):
+    def bin_surface(self, coords, rmin=None, rmax=None, nbins=50):
         """
         Return the binned coordinates.
 
@@ -98,9 +98,8 @@ class linecube:
         rbins:      The bin centres in [au]. Will just return those provided.
         zbins:      The [16th, 50th, 84th] percentiles of the surface height in
                     [au].
-        tbins:      Either the [16th, 50th, 84th] percentile of the brightness
-                    temperature of the bin or the maxmimum value of the bin,
-                    both in [K].
+        tbins:      The [16th, 50th, 84th] percentile of the brightness
+                    temperature of the bin in [K].
         """
 
         # Estimate the bins.
